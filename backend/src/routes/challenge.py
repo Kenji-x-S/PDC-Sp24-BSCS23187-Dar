@@ -2,21 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..ai_generator import generate_challenge_with_ai
-from ..database.db import (
+from ai_generator import generate_challenge_with_ai
+from database.db import (
     get_challenge_quota,
     create_challenge,
     create_challenge_quota,
     reset_quota_if_needed,
     get_user_challenges
 )
-from ..utils import authenticate_and_get_user_details
-from ..database.models import get_db
+from utils import authenticate_and_get_user_details
+from database.models import get_db
 import json
 from datetime import datetime
 
 router = APIRouter()
-
 
 class ChallengeRequest(BaseModel):
     difficulty: str
@@ -24,9 +23,22 @@ class ChallengeRequest(BaseModel):
     class Config:
         json_schema_extra = {"example": {"difficulty": "easy"}}
 
-
 @router.post("/generate-challenge")
 async def generate_challenge(request: ChallengeRequest, request_obj: Request, db: Session = Depends(get_db)):
+
+    breaker = request_obj.app.state.llm_breaker
+
+    if not breaker.check_state():
+        raise HTTPException(
+            status_code=503, 
+            detail="Fallback: AI Service is temporarily overloaded. Please try again later."
+        )
+
+
+    # --- TEMPORARILY BYPASSED FOR VIDEO DEMO ---
+    user_id = "test_demo_user"
+    
+    """
     try:
         user_details = authenticate_and_get_user_details(request_obj)
         user_id = user_details.get("user_id")
@@ -39,9 +51,31 @@ async def generate_challenge(request: ChallengeRequest, request_obj: Request, db
 
         if quota.quota_remaining <= 0:
             raise HTTPException(status_code=429, detail="Quota exhausted")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Auth/Quota Error: {str(e)}")
+    """
 
-        challenge_data = generate_challenge_with_ai(request.difficulty)
 
+    try:
+        # TEMPORARILY COMMENTED OUT THE REAL CALL:
+        # challenge_data = generate_challenge_with_ai(request.difficulty)
+        
+        # ADDED THIS TO FAKE A CRASH:
+        raise Exception("Simulated AI API Timeout")
+        
+        breaker.record_success()
+        
+    except Exception as llm_error:
+        breaker.record_failure()
+        raise HTTPException(
+            status_code=503, 
+            detail="External AI API is unresponsive."
+        )
+
+    try:
         new_challenge = create_challenge(
             db=db,
             difficulty=request.difficulty,
